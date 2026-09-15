@@ -1,0 +1,16 @@
+# IDEs
+.idea/
+.vscode/
+*.iml
+
+# Build output
+build/
+target/
+*.class
+
+# Runtime data and secrets
+admin2fa.yml
+blocked-ips.yml
+blocked-patterns.yml
+blackbox/
+removed-uuid-backups/
