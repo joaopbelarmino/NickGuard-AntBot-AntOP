@@ -1,23 +1,34 @@
-# NickGuard AntBot & AntOP/permission
+# NickGuard AntBot & AntOP
 
-Plugin de seguranca para servidores Minecraft Paper 1.21+, com protecao de identidade, 2FA administrativo, anti-OP, controle de permissoes perigosas e mitigacoes anti-bot/anti-raid.
+Plugin de seguranca para servidores Minecraft Paper, com protecao de identidade, 2FA administrativo, anti-OP, controle de permissoes perigosas e mitigacoes anti-bot/anti-raid.
 
-## Base inicial
+## Projeto
 
-- Artefato: `NickGuard-2.0.0.jar`
-- Versao do plugin: `2.0.0`
-- API Paper: `1.21.4`
+- Versao base: `2.0.0`
+- API: Paper `1.21.4`
 - Java: `21`
-- SHA-256: `9A0C943E901E6C507E657A9F0FCCF16D0D0B635B47D3D8D3965D164EF6F4A611`
+- Build: Maven
+- Classe principal: `me.zetra.nickguard.NickGuardPlugin`
 
-Este primeiro commit preserva exatamente o JAR escolhido como nova base de desenvolvimento. O codigo-fonte sera reconstruido e versionado nos proximos commits.
+O codigo-fonte foi reconstruido a partir do binario oficial usado pelo servidor e validado por recompilacao. O binario original nao e armazenado neste repositorio.
 
-## Instalacao
+## Compilar
 
-1. Coloque `NickGuard-2.0.0.jar` na pasta `plugins` do servidor.
-2. Inicie o servidor para gerar os arquivos de configuracao.
-3. Revise `plugins/NickGuard/config.yml` antes de colocar em producao.
+```bash
+./mvnw clean package
+```
 
-## Aviso
+No Windows, use `.\mvnw.cmd clean package`.
 
-Antes de substituir uma versao em producao, faca backup da pasta `plugins/NickGuard` e dos dados do servidor.
+O arquivo compilado sera gerado em `target/NickGuard-2.0.0.jar`.
+
+## Estrutura
+
+- `src/main/java`: codigo-fonte do plugin.
+- `src/main/resources/plugin.yml`: comandos, permissoes e metadados Paper.
+- `src/main/resources/config.yml`: configuracao padrao de seguranca.
+- `src/main/resources/admin2fa.yml`: estrutura inicial da persistencia 2FA, sem secrets.
+
+## Seguranca
+
+Arquivos de runtime, secrets 2FA, bloqueios persistidos, backups de UUID e logs nao devem ser enviados ao Git. Antes de atualizar o servidor, faca backup de `plugins/NickGuard`.

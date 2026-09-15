@@ -1,0 +1,33 @@
+name: NickGuard
+version: 2.0.0
+main: me.zetra.nickguard.NickGuardPlugin
+api-version: '1.21.4'
+author: Zetra
+description: Protege identidade de nick e adiciona ZetraMC 2FA para administradores.
+commands:
+  nickguard:
+    description: Administra protecoes do NickGuard.
+    usage: /nickguard reload|status|unblockip|blockip|unblockpattern|raidmode
+    permission: nickguard.admin
+  2fa:
+    description: Valida o codigo TOTP do ZetraMC 2FA.
+    usage: /2fa <codigo>
+  redefine:
+    description: Redefine o 2FA administrativo.
+    usage: /redefine 2FA [nick] ou /redefine <nick>
+    permission: nickguard.admin
+  verificar:
+    description: Lista UUIDs conhecidos para um nick ou todos os nicks duplicados.
+    usage: /verificar <nome|all>
+    permission: nickguard.admin
+  remover:
+    description: Move dados vanilla de um UUID para backup seguro.
+    usage: /remover <uuid> confirmar
+    permission: nickguard.admin
+permissions:
+  nickguard.admin:
+    description: Permite administrar e recarregar o NickGuard.
+    default: op
+  nickguard.2fa.bypass:
+    description: Ignora a exigencia do ZetraMC 2FA.
+    default: false

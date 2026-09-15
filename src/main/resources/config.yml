@@ -1,0 +1,212 @@
+enabled: true
+kick-message: "Este nickname já pertence a outra conta."
+ignore-staff-permission: false
+
+ADM_2FA:
+  - jaozinmDKK
+  - jaozinmdk
+  - LordeGTR
+
+security-admins:
+  - jaozinmDKK
+  - jaozinmdk
+  - LordeGTR
+
+admin-2fa:
+  enabled: true
+  issuer: "ZetraMC 2FA"
+  block-until-verified: true
+  code-command: "2fa"
+  reset-command: "redefine"
+  setup-url-message: true
+  kick-on-timeout: false
+  max-failed-attempts: 5
+  lockout-seconds: 60
+  reset-console-only: false
+
+anti-op:
+  enabled: true
+  allowed:
+    - jaozinmDKK
+    - jaozinmdk
+    - LordeGTR
+
+anti-luckperms-wildcard:
+  enabled: true
+  allowed:
+    - jaozinmDKK
+    - jaozinmdk
+    - LordeGTR
+  blocked-permissions:
+    - "*"
+    - "luckperms.*"
+    - "bukkit.command.op"
+    - "minecraft.command.op"
+
+anti-gamemode-creative:
+  enabled: true
+  allowed:
+    - jaozinmDKK
+    - jaozinmdk
+    - LordeGTR
+
+alerts:
+  discord:
+    enabled: false
+    webhook-url: ""
+
+raid-kick-message: "&cConexao bloqueada temporariamente pelo NickGuard."
+
+dangerous-permissions:
+  enabled: true
+  detect-any-wildcard: false
+  permissions:
+    - "*"
+    - "*.*"
+    - "op"
+    - "minecraft.command.op"
+    - "bukkit.command.op"
+    - "minecraft.command.gamemode"
+    - "bukkit.command.gamemode"
+    - "essentials.gamemode"
+    - "essentials.gamemode.*"
+    - "essentials.*"
+    - "luckperms.*"
+    - "worldedit.*"
+    - "fawe.*"
+    - "worldguard.*"
+    - "plugman.*"
+    - "deluxemenus.admin"
+    - "fancynpcs.*"
+    - "zetraAdmin.*"
+  contains-patterns:
+    - "admin"
+    - "owner"
+    - "operator"
+    - "console"
+  actions:
+    remove-op: true
+    kick-player: true
+    alert-console: true
+    alert-discord: true
+  quarantine-group: ""
+  command-on-detect: []
+  kick-message: "&cPermissao administrativa perigosa detectada."
+
+anti-relogin-flood:
+  enabled: true
+  window-seconds: 10
+  max-attempts: 10
+  temporary-ban-seconds: 3600
+  soft-limit-attempts: 3
+  soft-limit-window-seconds: 2
+  soft-block-seconds: 300
+  blacklist-attempts: 50
+  whitelist-ips:
+    - "127.0.0.1"
+    - "localhost"
+  ignore-proxy-ip: false
+
+similar-nick-protection:
+  enabled: true
+  window-seconds: 10
+  max-similar-nicks: 5
+  block-duration-seconds: 300
+  escalation-duration-seconds: 3600
+  block-keywords-immediately: false
+  normalize:
+    lowercase: true
+    remove-numbers: true
+    remove-symbols: true
+  blocked-keywords:
+    - "raid"
+    - "raider"
+    - "crash"
+    - "crasher"
+    - "packet"
+    - "packets"
+    - "mainraid"
+    - "mainpackets"
+    - "maincrasher"
+    - "main2pack"
+    - "main2packets"
+    - "xynis"
+
+client-signature-guard:
+  enabled: true
+  kick-player: true
+  kick-message: "&cCliente nao permitido no servidor."
+  # Observacao: clientes hack podem esconder/mudar brand. Isto bloqueia apenas quando eles vazam assinatura.
+  blocked-brands:
+    - "meteor"
+    - "meteorclient"
+    - "wurst"
+    - "impact"
+    - "aristois"
+    - "inertia"
+    - "future"
+    - "rusherhack"
+    - "bleachhack"
+    - "liquidbounce"
+    - "sigma"
+    - "novoline"
+    - "rise"
+    - "vape"
+    - "xynis"
+    - "main2packetsclient"
+    - "main2packets"
+    - "mainpackets"
+    - "maincrasher"
+  blocked-channels:
+    - "meteor"
+    - "meteor:main"
+    - "meteor-client"
+    - "wurst"
+    - "impact"
+    - "aristois"
+    - "inertia"
+    - "xynis"
+    - "main2packetsclient"
+    - "main2packets"
+    - "mainpackets"
+  blocked-patterns:
+    - "meteor"
+    - "wurst"
+    - "impact"
+    - "aristois"
+    - "inertia"
+    - "rusherhack"
+    - "bleachhack"
+    - "liquidbounce"
+    - "xynis"
+    - "main2packetsclient"
+    - "main2packets"
+    - "mainpackets"
+    - "maincrasher"
+
+blocked-commands:
+  enabled: true
+  message: "&cComando bloqueado pelo NickGuard."
+  commands:
+    - "pl"
+    - "plugins"
+    - "version"
+    - "ver"
+    - "about"
+    - "me"
+    - "minecraft:*"
+    - "bukkit:*"
+    - "server"
+    - "stop"
+    - "restart"
+    - "timings"
+    - "tps"
+
+raid-mode:
+  enabled: true
+  global-connections: 20
+  global-window-seconds: 5
+  similar-nicks: 10
+  suspicious-ips: 10
+  suspicious-window-seconds: 10
+  duration-seconds: 300
