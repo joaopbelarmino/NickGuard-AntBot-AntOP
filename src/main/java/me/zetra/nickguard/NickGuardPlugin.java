@@ -130,6 +130,8 @@ extends JavaPlugin {
         return this.admin2FA;
     }
 
+    public AlertService getAlertService() { return alertService; }
+
     public boolean onCommand(CommandSender commandSender, Command command, String string, String[] stringArray) {
         String string2 = command.getName().toLowerCase(Locale.ROOT);
         if (string2.equals("nickguard")) {
@@ -158,6 +160,7 @@ extends JavaPlugin {
         if (stringArray.length == 1 && stringArray[0].equalsIgnoreCase("reload")) {
             this.reloadConfig();
             this.configManager.reload();
+            this.alertService.reload();
             this.identityGuard.reload();
             this.admin2FA.reload();
             this.antiOpGuard.reload();
@@ -313,14 +316,15 @@ extends JavaPlugin {
             commandSender.sendMessage(ConfigManager.color("&b[NickGuard] Remocao segura por UUID"));
             commandSender.sendMessage(ConfigManager.color("&7uuid: &f" + String.valueOf(uUID)));
             commandSender.sendMessage(ConfigManager.color("&7arquivos vanilla encontrados: &f" + list.size()));
-            commandSender.sendMessage(ConfigManager.color("&7Isto move playerdata/stats/advancements, remove usercache e limpa cache do NickGuard."));
+            commandSender.sendMessage(ConfigManager.color("&7Move playerdata/stats/advancements e exclui o UUID do NickGuard de forma persistente."));
             commandSender.sendMessage(ConfigManager.color("&7Nao apaga dados de plugins como LuckPerms/nLogin/economia."));
             commandSender.sendMessage(ConfigManager.color("&eConfirmar: /remover " + String.valueOf(uUID) + " confirmar"));
             return true;
         }
         Player player = Bukkit.getPlayer((UUID)uUID);
         if (player != null) {
-            player.kickPlayer(ConfigManager.color("&cSeus dados foram removidos por um administrador."));
+            commandSender.sendMessage("Desconecte o jogador antes de remover os dados e repita o comando.");
+            return true;
         }
         String string = DateTimeFormatter.ofPattern("yyyyMMdd_HHmmss").format(LocalDateTime.now()) + "_" + String.valueOf(uUID);
         Path path = new File(this.getDataFolder(), "removed-uuid-backups/" + string).toPath();
@@ -337,8 +341,14 @@ extends JavaPlugin {
                 this.getLogger().warning("[NickGuard] Falha ao remover uuid=" + String.valueOf(uUID) + " arquivo=" + String.valueOf(path2) + " erro=" + iOException.getMessage());
             }
         }
-        int n = this.removeUserCacheEntries(uUID, path);
-        int n2 = this.identityGuard.removeUuid(uUID);
+        int n = 0; // The live server owns usercache.json; do not rewrite its on-disk cache.
+        int n2;
+        try { n2 = this.identityGuard.removeUuid(uUID); }
+        catch (IllegalStateException error) {
+            commandSender.sendMessage("Falha ao persistir exclusao; confira os backups em " + path);
+            getLogger().severe(error.getMessage());
+            return true;
+        }
         commandSender.sendMessage(ConfigManager.color("&a[NickGuard] Remocao concluida."));
         commandSender.sendMessage(ConfigManager.color("&7uuid: &f" + String.valueOf(uUID)));
         commandSender.sendMessage(ConfigManager.color("&7arquivos movidos: &f" + arrayList.size()));

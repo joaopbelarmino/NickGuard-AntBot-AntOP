@@ -43,11 +43,21 @@ PluginMessageListener {
     public void register() {
         Bukkit.getPluginManager().registerEvents((Listener)this, (Plugin)this.plugin);
         this.registerIncoming("minecraft:brand");
-        this.registerIncoming("MC|Brand");
     }
 
     public void unregister() {
         Bukkit.getMessenger().unregisterIncomingPluginChannel((Plugin)this.plugin);
+    }
+
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void onJoin(org.bukkit.event.player.PlayerJoinEvent event) {
+        Player player = event.getPlayer();
+        Bukkit.getScheduler().runTask(plugin, () -> {
+            if (!player.isOnline() || !enabled() || config.isSecurityAdmin(player.getName())) return;
+            String brand = player.getClientBrandName();
+            if (matchesList(brand, "client-signature-guard.blocked-brands")
+                    || matchesList(brand, "client-signature-guard.blocked-patterns")) punish(player, "Paper client brand", brand);
+        });
     }
 
     @EventHandler(priority=EventPriority.LOWEST, ignoreCancelled=true)
@@ -124,4 +134,3 @@ PluginMessageListener {
         return this.plugin.getConfig().getBoolean("client-signature-guard.enabled", true);
     }
 }
-

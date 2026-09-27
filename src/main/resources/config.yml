@@ -1,42 +1,36 @@
 enabled: true
 kick-message: "Este nickname já pertence a outra conta."
-ignore-staff-permission: false
+ignore-staff-permission: false # Legado; identidade nunca ignora staff.
 
-ADM_2FA:
-  - jaozinmDKK
-  - jaozinmdk
-  - LordeGTR
+# Preencha com os administradores deste servidor.
+ADM_2FA: []
 
-security-admins:
-  - jaozinmDKK
-  - jaozinmdk
-  - LordeGTR
+security-admins: []
+
+# UUIDs fixos opcionais: nick em lowercase -> UUID confirmado pelo operador.
+admin-identities: {}
+require-admin-uuid: false
 
 admin-2fa:
   enabled: true
   issuer: "ZetraMC 2FA"
-  block-until-verified: true
+  block-until-verified: true # Obrigatorio para ADM_2FA; false nao desativa o bloqueio.
   code-command: "2fa"
   reset-command: "redefine"
-  setup-url-message: true
+  setup-url-message: false # Legado; cadastro agora e entregue pelo operador.
   kick-on-timeout: false
   max-failed-attempts: 5
   lockout-seconds: 60
-  reset-console-only: false
+  reset-console-only: true
+  timeout-seconds: 120
 
 anti-op:
   enabled: true
-  allowed:
-    - jaozinmDKK
-    - jaozinmdk
-    - LordeGTR
+  allowed: []
 
 anti-luckperms-wildcard:
   enabled: true
-  allowed:
-    - jaozinmDKK
-    - jaozinmdk
-    - LordeGTR
+  allowed: []
   blocked-permissions:
     - "*"
     - "luckperms.*"
@@ -45,12 +39,10 @@ anti-luckperms-wildcard:
 
 anti-gamemode-creative:
   enabled: true
-  allowed:
-    - jaozinmDKK
-    - jaozinmdk
-    - LordeGTR
+  allowed: []
 
 alerts:
+  minimum-interval-seconds: 5
   discord:
     enabled: false
     webhook-url: ""
@@ -194,6 +186,8 @@ blocked-commands:
     - "ver"
     - "about"
     - "me"
+    - "help"
+    - "?"
     - "minecraft:*"
     - "bukkit:*"
     - "server"

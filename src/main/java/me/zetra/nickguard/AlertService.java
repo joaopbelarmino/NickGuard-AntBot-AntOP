@@ -1,67 +1,91 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  org.bukkit.Bukkit
- *  org.bukkit.entity.Player
- */
 package me.zetra.nickguard;
 
+import com.google.gson.Gson;
 import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import me.zetra.nickguard.ConfigManager;
-import me.zetra.nickguard.NickGuardPlugin;
+import java.net.http.*;
+import java.time.Duration;
+import java.util.List;
+import java.util.Map;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import org.bukkit.Bukkit;
 import org.bukkit.entity.Player;
 
 public final class AlertService {
     private final NickGuardPlugin plugin;
     private final ConfigManager config;
-    private final HttpClient httpClient = HttpClient.newHttpClient();
+    private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
+    private final AtomicLong nextAlert = new AtomicLong();
+    private final AtomicLong suppressed = new AtomicLong();
+    private final AtomicBoolean inFlight = new AtomicBoolean();
+    private volatile boolean discordEnabled;
+    private volatile String webhook;
+    private volatile long intervalMillis;
 
-    public AlertService(NickGuardPlugin nickGuardPlugin, ConfigManager configManager) {
-        this.plugin = nickGuardPlugin;
-        this.config = configManager;
+    public AlertService(NickGuardPlugin plugin, ConfigManager config) {
+        this.plugin = plugin;
+        this.config = config;
+        reload();
     }
 
-    public void warn(String string) {
-        this.plugin.getLogger().warning("[NICKGUARD] " + string);
-        this.notifyAdmins("&c[NickGuard] &f" + string);
-        this.sendDiscord(string);
+    public void reload() {
+        discordEnabled = plugin.getConfig().getBoolean("alerts.discord.enabled", false);
+        webhook = plugin.getConfig().getString("alerts.discord.webhook-url", "");
+        intervalMillis = Math.max(1, plugin.getConfig().getInt("alerts.minimum-interval-seconds", 5)) * 1000L;
     }
 
-    public void info(String string) {
-        this.plugin.getLogger().info("[NICKGUARD] " + string);
-    }
-
-    private void notifyAdmins(String string) {
-        String string2 = ConfigManager.color(string);
-        for (Player player : Bukkit.getOnlinePlayers()) {
-            if (!this.config.isSecurityAdmin(player.getName()) && !player.hasPermission("nickguard.admin")) continue;
-            player.sendMessage(string2);
-        }
-    }
-
-    private void sendDiscord(String string) {
-        if (!this.plugin.getConfig().getBoolean("alerts.discord.enabled", false)) {
+    public void warn(String message) {
+        long now = System.currentTimeMillis();
+        long next = nextAlert.get();
+        if (now < next || !nextAlert.compareAndSet(next, now + intervalMillis)) {
+            suppressed.incrementAndGet();
             return;
         }
-        String string2 = this.plugin.getConfig().getString("alerts.discord.webhook-url", "");
-        if (string2 == null || string2.isBlank()) {
-            return;
-        }
-        String string3 = "{\"content\":\"" + this.escapeJson("[NICKGUARD] " + string) + "\"}";
-        HttpRequest httpRequest = HttpRequest.newBuilder(URI.create(string2)).header("Content-Type", "application/json").POST(HttpRequest.BodyPublishers.ofString(string3)).build();
-        this.httpClient.sendAsync(httpRequest, HttpResponse.BodyHandlers.discarding()).exceptionally(throwable -> {
-            this.plugin.getLogger().warning("[NICKGUARD] Falha ao enviar alerta Discord: " + throwable.getMessage());
-            return null;
-        });
+        long count = suppressed.getAndSet(0);
+        String clean = message.replaceAll("[\\p{Cntrl}]", " ");
+        if (clean.length() > 1600) clean = clean.substring(0, 1600);
+        String text = clean + (count == 0 ? "" : " [suppressed alerts=" + count + "]");
+        plugin.getLogger().warning("[NICKGUARD] " + text);
+        Runnable notify = () -> {
+            for (Player player : Bukkit.getOnlinePlayers()) {
+                if (plugin.getAdmin2FA() != null && plugin.getAdmin2FA().isBlocked(player)) continue;
+                if (config.isSecurityAdmin(player.getName()) || player.hasPermission("nickguard.admin"))
+                    player.sendMessage(ConfigManager.color("&c[NickGuard] &f" + text));
+            }
+        };
+        if (Bukkit.isPrimaryThread()) notify.run();
+        else if (plugin.isEnabled()) Bukkit.getScheduler().runTask(plugin, notify);
+        sendDiscord(text);
     }
 
-    private String escapeJson(String string) {
-        return string.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
+    public void info(String message) { plugin.getLogger().info("[NICKGUARD] " + message); }
+
+    static String discordPayload(String message) {
+        return new Gson().toJson(Map.of("content", "[NICKGUARD] " + message,
+                "allowed_mentions", Map.of("parse", List.of())));
+    }
+
+    private void sendDiscord(String message) {
+        if (!discordEnabled || webhook == null || webhook.isBlank() || !inFlight.compareAndSet(false, true)) return;
+        try {
+            HttpRequest request = HttpRequest.newBuilder(URI.create(webhook))
+                    .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(discordPayload(message))).build();
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding()).whenComplete((response, error) -> {
+                inFlight.set(false);
+                if (error != null) {
+                    plugin.getLogger().warning("[NICKGUARD] Falha ao enviar alerta Discord.");
+                } else if (response.statusCode() == 429) {
+                    long seconds = 60;
+                    try { seconds = Math.max(1, Long.parseLong(response.headers().firstValue("Retry-After").orElse("60"))); }
+                    catch (NumberFormatException ignored) {}
+                    long retry = System.currentTimeMillis() + Math.min(seconds, 3600) * 1000L;
+                    nextAlert.accumulateAndGet(retry, Math::max);
+                }
+            });
+        } catch (RuntimeException error) {
+            inFlight.set(false);
+            plugin.getLogger().warning("[NICKGUARD] Webhook invalido; confira alerts.discord.webhook-url.");
+        }
     }
 }
-

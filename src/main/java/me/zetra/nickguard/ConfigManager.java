@@ -15,7 +15,6 @@ import me.zetra.nickguard.NickGuardPlugin;
 import org.bukkit.configuration.file.FileConfiguration;
 
 public final class ConfigManager {
-    private static final List<String> DEFAULT_ADMINS = List.of("jaozinmDKK", "jaozinmdk", "LordeGTR");
     private final NickGuardPlugin plugin;
     private Set<String> adm2FA = Set.of();
     private Set<String> securityAdmins = Set.of();
@@ -32,11 +31,11 @@ public final class ConfigManager {
     public void reload() {
         this.plugin.reloadConfig();
         FileConfiguration fileConfiguration = this.plugin.getConfig();
-        this.adm2FA = this.lowerConfiguredSet(fileConfiguration, "ADM_2FA", DEFAULT_ADMINS);
-        this.securityAdmins = this.lowerConfiguredSet(fileConfiguration, "security-admins", DEFAULT_ADMINS);
-        this.antiOpAllowed = this.lowerConfiguredSet(fileConfiguration, "anti-op.allowed", DEFAULT_ADMINS);
-        this.antiLuckAllowed = this.lowerConfiguredSet(fileConfiguration, "anti-luckperms-wildcard.allowed", DEFAULT_ADMINS);
-        this.antiGameModeAllowed = this.lowerConfiguredSet(fileConfiguration, "anti-gamemode-creative.allowed", DEFAULT_ADMINS);
+        this.adm2FA = this.lowerSet(fileConfiguration.getStringList("ADM_2FA"));
+        this.securityAdmins = this.lowerSet(fileConfiguration.getStringList("security-admins"));
+        this.antiOpAllowed = this.lowerSet(fileConfiguration.getStringList("anti-op.allowed"));
+        this.antiLuckAllowed = this.lowerSet(fileConfiguration.getStringList("anti-luckperms-wildcard.allowed"));
+        this.antiGameModeAllowed = this.lowerSet(fileConfiguration.getStringList("anti-gamemode-creative.allowed"));
         this.blockedPermissions = this.lowerSet(fileConfiguration.getStringList("anti-luckperms-wildcard.blocked-permissions"));
     }
 
@@ -61,11 +60,11 @@ public final class ConfigManager {
     }
 
     public String getCodeCommand() {
-        return this.plugin.getConfig().getString("admin-2fa.code-command", "2fa").toLowerCase(Locale.ROOT);
+        return "2fa";
     }
 
     public String getResetCommand() {
-        return this.plugin.getConfig().getString("admin-2fa.reset-command", "redefine").toLowerCase(Locale.ROOT);
+        return "redefine";
     }
 
     public boolean setupUrlMessage() {
@@ -93,19 +92,19 @@ public final class ConfigManager {
     }
 
     public boolean isSecurityAdmin(String string) {
-        return this.securityAdmins.contains(ConfigManager.lower(string));
+        return this.securityAdmins.contains(ConfigManager.lower(string)) && sessionAuthorized(string);
     }
 
     public boolean isAntiOpAllowed(String string) {
-        return this.antiOpAllowed.contains(ConfigManager.lower(string));
+        return this.antiOpAllowed.contains(ConfigManager.lower(string)) && sessionAuthorized(string);
     }
 
     public boolean isAntiLuckAllowed(String string) {
-        return this.antiLuckAllowed.contains(ConfigManager.lower(string));
+        return this.antiLuckAllowed.contains(ConfigManager.lower(string)) && sessionAuthorized(string);
     }
 
     public boolean isAntiGameModeAllowed(String string) {
-        return this.antiGameModeAllowed.contains(ConfigManager.lower(string));
+        return this.antiGameModeAllowed.contains(ConfigManager.lower(string)) && sessionAuthorized(string);
     }
 
     public Set<String> blockedPermissions() {
@@ -127,12 +126,16 @@ public final class ConfigManager {
         return list.stream().filter(string -> string != null && !string.isBlank()).map(ConfigManager::lower).collect(Collectors.toCollection(HashSet::new));
     }
 
-    private Set<String> lowerConfiguredSet(FileConfiguration fileConfiguration, String string, List<String> list) {
-        Set<String> set = this.lowerSet(fileConfiguration.getStringList(string));
-        if (!set.isEmpty()) {
-            return set;
-        }
-        return this.lowerSet(list);
+    private boolean sessionAuthorized(String name) {
+        org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayerExact(name);
+        if (player == null || !matchesPinnedUuid(player)) return false;
+        return !admin2FAEnabled() || !isAdmin2FA(name)
+                || (plugin.getAdmin2FA() != null && plugin.getAdmin2FA().isVerified(player.getUniqueId()));
+    }
+
+    public boolean matchesPinnedUuid(org.bukkit.entity.Player player) {
+        String uuid = plugin.getConfig().getString("admin-identities." + lower(player.getName()), "");
+        return uuid.isBlank() ? !plugin.getConfig().getBoolean("require-admin-uuid", false)
+                : uuid.equalsIgnoreCase(player.getUniqueId().toString());
     }
 }
-

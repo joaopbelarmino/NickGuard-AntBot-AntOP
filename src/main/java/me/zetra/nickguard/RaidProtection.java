@@ -47,13 +47,19 @@ implements Listener {
     private final NickGuardPlugin plugin;
     private final AlertService alerts;
     private final Map<String, Deque<Long>> ipAttempts = new ConcurrentHashMap<String, Deque<Long>>();
-    private final Map<String, Deque<Long>> patternAttempts = new ConcurrentHashMap<String, Deque<Long>>();
+    private final Map<String, SimilarNickWindow> patternAttempts = new ConcurrentHashMap<>();
+    private final java.util.concurrent.atomic.AtomicBoolean dirty = new java.util.concurrent.atomic.AtomicBoolean();
+    private final java.util.concurrent.ScheduledExecutorService writer = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+        Thread thread = new Thread(r, "NickGuard-BlockWriter");
+        thread.setDaemon(true);
+        return thread;
+    });
     private final Map<String, Long> blockedIps = new ConcurrentHashMap<String, Long>();
     private final Map<String, Long> blockedPatterns = new ConcurrentHashMap<String, Long>();
     private final Deque<Long> globalAttempts = new ConcurrentLinkedDeque<Long>();
     private final Map<String, Long> recentIps = new ConcurrentHashMap<String, Long>();
     private BukkitTask cleanupTask;
-    private boolean manualRaidMode;
+    private volatile boolean manualRaidMode;
     private volatile long raidModeUntil;
 
     public RaidProtection(NickGuardPlugin nickGuardPlugin, AlertService alertService) {
@@ -65,15 +71,34 @@ implements Listener {
     public void register() {
         Bukkit.getPluginManager().registerEvents((Listener)this, (Plugin)this.plugin);
         this.cleanupTask = Bukkit.getScheduler().runTaskTimer((Plugin)this.plugin, this::cleanup, 1200L, 1200L);
+        writer.scheduleWithFixedDelay(() -> {
+            if (dirty.getAndSet(false)) {
+                try { saveBlocks(); }
+                catch (RuntimeException error) {
+                    dirty.set(true);
+                    plugin.getLogger().warning("Falha na gravacao dos bloqueios; sera tentada novamente.");
+                }
+            }
+        }, 1, 1, java.util.concurrent.TimeUnit.SECONDS);
     }
 
     public void reload() {
-        this.loadBlocks();
+        this.cleanup();
     }
 
     public void cancel() {
         if (this.cleanupTask != null) {
             this.cleanupTask.cancel();
+        }
+        writer.shutdown();
+        try {
+            if (!writer.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                plugin.getLogger().warning("Gravacao de bloqueios ainda em andamento ao desligar.");
+                return;
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            return;
         }
         this.saveBlocks();
     }
@@ -124,7 +149,8 @@ implements Listener {
             }
         }
         if (this.similarNickEnabled()) {
-            int n4 = this.recordAndCount(this.patternAttempts, string3, l2, (long)this.similarWindowSeconds() * 1000L);
+            int n4 = this.patternAttempts.computeIfAbsent(string3, key -> new SimilarNickWindow())
+                    .record(string2, l2, (long)this.similarWindowSeconds() * 1000L);
             boolean keywordMatch = this.containsBlockedKeyword(string3);
             boolean strictRaid = this.isRaidModeActive() && (keywordMatch || n4 >= Math.max(2, this.similarMaxNicks() / 2));
             if (keywordMatch && this.blockKeywordsImmediately()) {
@@ -222,9 +248,12 @@ implements Listener {
     }
 
     private int recordAndCount(Map<String, Deque<Long>> map, String string2, long l, long l2) {
-        Deque deque = map.computeIfAbsent(string2, string -> new ConcurrentLinkedDeque());
-        deque.addLast(l);
-        return this.countWithin(deque, l, l2);
+        Deque<Long> deque = map.computeIfAbsent(string2, string -> new ConcurrentLinkedDeque<>());
+        synchronized (deque) {
+            deque.addLast(l);
+            prune(deque, l, Math.max(60000L, l2));
+            return this.countWithin(deque, l, l2);
+        }
     }
 
     private int countWithin(Deque<Long> deque, long l, long l2) {
@@ -232,10 +261,14 @@ implements Listener {
         if (deque == null) {
             return 0;
         }
-        while ((l3 = deque.peekFirst()) != null && l - l3 > l2) {
-            deque.pollFirst();
+        return (int) deque.stream().filter(time -> l - time <= l2).count();
+    }
+
+    private void prune(Deque<Long> queue, long now, long retention) {
+        synchronized (queue) {
+            Long first;
+            while ((first = queue.peekFirst()) != null && now - first > retention) queue.pollFirst();
         }
-        return deque.size();
     }
 
     private boolean isActiveBlock(Long l, long l2) {
@@ -253,9 +286,10 @@ implements Listener {
         this.blockedIps.entrySet().removeIf(entry -> (Long)entry.getValue() != -1L && (Long)entry.getValue() <= l);
         this.blockedPatterns.entrySet().removeIf(entry -> (Long)entry.getValue() != -1L && (Long)entry.getValue() <= l);
         this.ipAttempts.entrySet().removeIf(entry -> this.countWithin((Deque)entry.getValue(), l, 60000L) == 0);
-        this.patternAttempts.entrySet().removeIf(entry -> this.countWithin((Deque)entry.getValue(), l, (long)this.similarWindowSeconds() * 1000L) == 0);
+        this.patternAttempts.entrySet().removeIf(entry -> entry.getValue().expire(l, (long)this.similarWindowSeconds() * 1000L));
         this.recentIps.entrySet().removeIf(entry -> l - (Long)entry.getValue() > (long)this.raidSuspiciousWindowSeconds() * 1000L);
-        this.saveBlocks();
+        prune(globalAttempts, l, Math.max(60000L, raidGlobalWindowSeconds() * 1000L));
+        this.saveBlocksAsync();
     }
 
     private void loadBlocks() {
@@ -284,7 +318,7 @@ implements Listener {
     }
 
     private void saveBlocksAsync() {
-        Bukkit.getScheduler().runTaskAsynchronously((Plugin)this.plugin, this::saveBlocks);
+        dirty.set(true);
     }
 
     private void saveBlocks() {
@@ -299,9 +333,10 @@ implements Listener {
             yamlConfiguration.set("blocked." + this.encodeKey(entry.getKey()) + ".value", (Object)entry.getKey());
         }
         try {
-            yamlConfiguration.save(file);
+            AtomicFiles.write(file.toPath(), yamlConfiguration.saveToString());
         }
         catch (IOException iOException) {
+            dirty.set(true);
             this.plugin.getLogger().warning("[NICKGUARD] Falha ao salvar " + file.getName() + ": " + iOException.getMessage());
         }
     }
@@ -329,18 +364,10 @@ implements Listener {
     }
 
     private String normalizeNick(String string) {
-        String string2;
-        String string3 = string2 = string == null ? "" : string;
-        if (this.plugin.getConfig().getBoolean("similar-nick-protection.normalize.lowercase", true)) {
-            string2 = string2.toLowerCase(Locale.ROOT);
-        }
-        if (this.plugin.getConfig().getBoolean("similar-nick-protection.normalize.remove-numbers", true)) {
-            string2 = string2.replaceAll("[0-9]", "");
-        }
-        if (this.plugin.getConfig().getBoolean("similar-nick-protection.normalize.remove-symbols", true)) {
-            string2 = string2.replaceAll("[^a-zA-Z]", "");
-        }
-        return string2;
+        return SimilarNickWindow.normalize(string == null ? "" : string,
+                plugin.getConfig().getBoolean("similar-nick-protection.normalize.lowercase", true),
+                plugin.getConfig().getBoolean("similar-nick-protection.normalize.remove-numbers", true),
+                plugin.getConfig().getBoolean("similar-nick-protection.normalize.remove-symbols", true));
     }
 
     private boolean containsBlockedKeyword(String string) {
@@ -352,7 +379,8 @@ implements Listener {
     }
 
     private boolean isIpWhitelisted(String string) {
-        return new HashSet(this.plugin.getConfig().getStringList("anti-relogin-flood.whitelist-ips")).contains(string);
+        java.util.List<String> ips = plugin.getConfig().getStringList("anti-relogin-flood.whitelist-ips");
+        return ips.contains(string) || (ips.contains("localhost") && (string.startsWith("127.") || string.equals("::1") || string.equals("0:0:0:0:0:0:0:1")));
     }
 
     private boolean shouldIgnoreProxyIp(String string) {
@@ -437,7 +465,7 @@ implements Listener {
     }
 
     private boolean blockKeywordsImmediately() {
-        return this.plugin.getConfig().getBoolean("similar-nick-protection.block-keywords-immediately", true);
+        return this.plugin.getConfig().getBoolean("similar-nick-protection.block-keywords-immediately", false);
     }
 
     private int raidGlobalConnections() {

@@ -1,108 +1,116 @@
-/*
- * Decompiled with CFR 0.152.
- * 
- * Could not load the following classes:
- *  org.bukkit.Bukkit
- *  org.bukkit.OfflinePlayer
- *  org.bukkit.event.EventHandler
- *  org.bukkit.event.EventPriority
- *  org.bukkit.event.Listener
- *  org.bukkit.event.player.AsyncPlayerPreLoginEvent
- *  org.bukkit.event.player.AsyncPlayerPreLoginEvent$Result
- *  org.bukkit.event.player.PlayerJoinEvent
- *  org.bukkit.plugin.Plugin
- */
 package me.zetra.nickguard;
 
-import java.net.InetAddress;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import me.zetra.nickguard.ConfigManager;
-import me.zetra.nickguard.NickGuardPlugin;
+import java.util.*;
 import org.bukkit.Bukkit;
 import org.bukkit.OfflinePlayer;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.player.AsyncPlayerPreLoginEvent;
-import org.bukkit.event.player.PlayerJoinEvent;
-import org.bukkit.plugin.Plugin;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.event.*;
+import org.bukkit.event.player.*;
 
-public final class IdentityGuard
-implements Listener {
+/** Existing ambiguous identities are blocked until an administrator resolves the case. */
+public final class IdentityGuard implements Listener {
     private final NickGuardPlugin plugin;
     private final ConfigManager config;
-    private final Map<String, KnownIdentity> knownIdentities = new ConcurrentHashMap<String, KnownIdentity>();
+    private final Map<String, Set<UUID>> known = new HashMap<>();
+    private final Map<String, Reservation> reservations = new HashMap<>();
+    private final Set<UUID> ignored = new HashSet<>();
+    private final java.io.File exclusions;
 
-    public IdentityGuard(NickGuardPlugin nickGuardPlugin, ConfigManager configManager) {
-        this.plugin = nickGuardPlugin;
-        this.config = configManager;
-        this.reload();
+    public IdentityGuard(NickGuardPlugin plugin, ConfigManager config) {
+        this.plugin = plugin;
+        this.config = config;
+        exclusions = new java.io.File(plugin.getDataFolder(), "identity-exclusions.yml");
+        for (String value : YamlConfiguration.loadConfiguration(exclusions).getStringList("uuids")) {
+            try { ignored.add(UUID.fromString(value)); }
+            catch (IllegalArgumentException invalid) { plugin.getLogger().warning("UUID invalido em identity-exclusions.yml."); }
+        }
+        for (OfflinePlayer player : Bukkit.getOfflinePlayers()) {
+            if (player.getName() != null && !ignored.contains(player.getUniqueId()))
+                known.computeIfAbsent(ConfigManager.lower(player.getName()), key -> new HashSet<>()).add(player.getUniqueId());
+        }
+        plugin.getLogger().info("NickGuard identity cache: " + known.size() + " nicks.");
     }
 
     public void register() {
-        Bukkit.getPluginManager().registerEvents((Listener)this, (Plugin)this.plugin);
+        Bukkit.getPluginManager().registerEvents(this, plugin);
+        Bukkit.getScheduler().runTaskTimer(plugin, this::expireReservations, 1200L, 1200L);
     }
 
-    public void reload() {
-        this.rebuildKnownIdentities();
+    public void reload() { expireReservations(); }
+
+    private synchronized void expireReservations() {
+        long now = System.currentTimeMillis();
+        reservations.values().removeIf(value -> value.expiresAt < now);
     }
 
-    public int removeUuid(UUID uUID) {
-        int n = this.knownIdentities.size();
-        this.knownIdentities.entrySet().removeIf(entry -> ((KnownIdentity)entry.getValue()).uuid().equals(uUID));
-        return n - this.knownIdentities.size();
+    public synchronized int removeUuid(UUID uuid) {
+        // Tombstones prevent the server's in-memory usercache from importing the removed UUID again.
+        Set<UUID> updated = new HashSet<>(ignored);
+        updated.add(uuid);
+        YamlConfiguration yaml = new YamlConfiguration();
+        yaml.set("uuids", updated.stream().map(UUID::toString).sorted().toList());
+        try { AtomicFiles.write(exclusions.toPath(), yaml.saveToString()); }
+        catch (java.io.IOException error) { throw new IllegalStateException("Nao foi possivel salvar exclusao de identidade.", error); }
+        ignored.add(uuid);
+        int changed = 0;
+        for (Set<UUID> identities : known.values()) if (identities.remove(uuid)) changed++;
+        known.values().removeIf(Set::isEmpty);
+        reservations.values().removeIf(value -> value.uuid.equals(uuid));
+        return changed;
     }
 
-    @EventHandler(priority=EventPriority.LOWEST)
-    public void onAsyncPreLogin(AsyncPlayerPreLoginEvent asyncPlayerPreLoginEvent) {
-        if (!this.config.isIdentityGuardEnabled()) {
-            return;
+    private synchronized boolean reserve(String nick, UUID uuid) {
+        if (ignored.contains(uuid)) return false;
+        String key = ConfigManager.lower(nick);
+        Set<UUID> identities = known.get(key);
+        if (identities != null) return identities.size() == 1 && identities.contains(uuid);
+        long now = System.currentTimeMillis();
+        Reservation reservation = reservations.get(key);
+        if (reservation != null && reservation.expiresAt > now && !reservation.uuid.equals(uuid)) return false;
+        reservations.put(key, new Reservation(uuid, now + 60000));
+        return true;
+    }
+
+    private synchronized void release(String name, UUID uuid) {
+        String key = ConfigManager.lower(name);
+        Reservation value = reservations.get(key);
+        if (value != null && value.uuid.equals(uuid)) reservations.remove(key);
+    }
+
+    @EventHandler(priority=EventPriority.HIGHEST)
+    public void onAsyncPreLogin(AsyncPlayerPreLoginEvent event) {
+        if (!config.isIdentityGuardEnabled() || event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) return;
+        if (!reserve(event.getName(), event.getUniqueId())) {
+            event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, config.identityKickMessage());
+            plugin.getAlertService().warn("Identity bloqueada nick=" + event.getName() + " uuid_tentativa=" + event.getUniqueId()
+                    + " reason=UUID diferente, removido ou historico ambiguo");
         }
-        String string = asyncPlayerPreLoginEvent.getName();
-        String string2 = ConfigManager.lower(string);
-        UUID uUID = asyncPlayerPreLoginEvent.getUniqueId();
-        KnownIdentity knownIdentity = this.knownIdentities.get(string2);
-        if (knownIdentity == null) {
-            KnownIdentity knownIdentity2 = this.knownIdentities.putIfAbsent(string2, new KnownIdentity(string, uUID));
-            if (knownIdentity2 != null && !knownIdentity2.uuid().equals(uUID)) {
-                this.block(asyncPlayerPreLoginEvent, string, knownIdentity2.uuid(), uUID);
-            }
-            return;
-        }
-        UUID uUID2 = knownIdentity.uuid();
-        if (uUID2.equals(uUID)) {
-            return;
-        }
-        this.block(asyncPlayerPreLoginEvent, string, uUID2, uUID);
-    }
-
-    private void block(AsyncPlayerPreLoginEvent asyncPlayerPreLoginEvent, String string, UUID uUID, UUID uUID2) {
-        this.plugin.getLogger().warning("[NickGuard] Bloqueado nick=" + string + " uuid_existente=" + String.valueOf(uUID) + " uuid_tentativa=" + String.valueOf(uUID2) + " ip=" + this.formatIp(asyncPlayerPreLoginEvent.getAddress()));
-        asyncPlayerPreLoginEvent.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, this.config.identityKickMessage());
     }
 
     @EventHandler(priority=EventPriority.MONITOR)
-    public void onPlayerJoin(PlayerJoinEvent playerJoinEvent) {
-        this.knownIdentities.putIfAbsent(ConfigManager.lower(playerJoinEvent.getPlayer().getName()), new KnownIdentity(playerJoinEvent.getPlayer().getName(), playerJoinEvent.getPlayer().getUniqueId()));
+    public void onPreLoginResult(AsyncPlayerPreLoginEvent event) {
+        if (event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) release(event.getName(), event.getUniqueId());
     }
 
-    private void rebuildKnownIdentities() {
-        this.knownIdentities.clear();
-        for (OfflinePlayer offlinePlayer : Bukkit.getOfflinePlayers()) {
-            String string = offlinePlayer.getName();
-            if (string == null) continue;
-            this.knownIdentities.putIfAbsent(ConfigManager.lower(string), new KnownIdentity(string, offlinePlayer.getUniqueId()));
-        }
-        this.plugin.getLogger().info("NickGuard identity cache: " + this.knownIdentities.size() + " nicks.");
+    @EventHandler(priority=EventPriority.HIGHEST)
+    public void onLogin(PlayerLoginEvent event) {
+        if (!config.isIdentityGuardEnabled() || event.getResult() != PlayerLoginEvent.Result.ALLOWED) return;
+        if (!reserve(event.getPlayer().getName(), event.getPlayer().getUniqueId()))
+            event.disallow(PlayerLoginEvent.Result.KICK_OTHER, config.identityKickMessage());
     }
 
-    private String formatIp(InetAddress inetAddress) {
-        return inetAddress == null ? "unknown" : inetAddress.getHostAddress();
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void onLoginResult(PlayerLoginEvent event) {
+        if (event.getResult() != PlayerLoginEvent.Result.ALLOWED)
+            release(event.getPlayer().getName(), event.getPlayer().getUniqueId());
     }
 
-    private record KnownIdentity(String nick, UUID uuid) {
+    @EventHandler(priority=EventPriority.MONITOR)
+    public synchronized void onPlayerJoin(PlayerJoinEvent event) {
+        UUID uuid = event.getPlayer().getUniqueId();
+        if (!ignored.contains(uuid)) known.computeIfAbsent(ConfigManager.lower(event.getPlayer().getName()), key -> new HashSet<>()).add(uuid);
+        release(event.getPlayer().getName(), uuid);
     }
+
+    private record Reservation(UUID uuid, long expiresAt) {}
 }
-

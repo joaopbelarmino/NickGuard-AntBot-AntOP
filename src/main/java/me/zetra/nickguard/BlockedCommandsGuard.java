@@ -71,6 +71,13 @@ implements Listener {
         return string.equals(string3) || string2.equals(string3);
     }
 
+    @EventHandler(priority=EventPriority.HIGHEST)
+    public void onSendCommands(org.bukkit.event.player.PlayerCommandSendEvent event) {
+        if (!plugin.getConfig().getBoolean("blocked-commands.enabled", true) || config.isSecurityAdmin(event.getPlayer().getName())) return;
+        event.getCommands().removeIf(command -> plugin.getConfig().getStringList("blocked-commands.commands").stream()
+                .anyMatch(rule -> matches(commandRoot(command), commandBase(commandRoot(command)), rule.toLowerCase(Locale.ROOT).trim())));
+    }
+
     private String commandRoot(String string) {
         String string2 = string.startsWith("/") ? string.substring(1) : string;
         return string2.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
@@ -81,4 +88,3 @@ implements Listener {
         return n >= 0 ? string.substring(n + 1) : string;
     }
 }
-

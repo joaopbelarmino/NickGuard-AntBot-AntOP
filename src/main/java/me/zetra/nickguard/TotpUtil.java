@@ -28,17 +28,22 @@ public final class TotpUtil {
     }
 
     public static boolean verify(String string, String string2) {
+        return matchingStep(string, string2, System.currentTimeMillis(), -1) >= 0;
+    }
+
+    public static long matchingStep(String string, String string2, long nowMillis, long lastUsedStep) {
         String string3;
         String string4 = string3 = string2 == null ? "" : string2.replace(" ", "").trim();
         if (!string3.matches("\\d{6}")) {
-            return false;
+            return -1;
         }
-        long l = System.currentTimeMillis() / 1000L / 30L;
+        long l = nowMillis / 1000L / 30L;
         for (long i = -1L; i <= 1L; ++i) {
+            if (l + i <= lastUsedStep) continue;
             if (!TotpUtil.generateCode(string, l + i).equals(string3)) continue;
-            return true;
+            return l + i;
         }
-        return false;
+        return -1;
     }
 
     public static String otpauthUrl(String string, String string2, String string3) {
@@ -88,7 +93,7 @@ public final class TotpUtil {
         int n2 = 0;
         for (char c : string2.toCharArray()) {
             int n3 = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567".indexOf(c);
-            if (n3 < 0) continue;
+            if (n3 < 0) throw new IllegalArgumentException("Invalid Base32 secret");
             n = n << 5 | n3;
             if ((n2 += 5) < 8) continue;
             byteBuffer.put((byte)(n >> n2 - 8 & 0xFF));
@@ -104,4 +109,3 @@ public final class TotpUtil {
         return URLEncoder.encode(string, StandardCharsets.UTF_8).replace("+", "%20");
     }
 }
-

@@ -65,16 +65,19 @@ implements Listener {
         }
         String string3 = string.startsWith("/") ? string.substring(1) : string;
         String[] stringArray = string3.split("\\s+");
-        if (stringArray.length < 6) {
+        if (stringArray.length < 1) {
             return false;
         }
         String string4 = this.stripNamespace(stringArray[0]);
         if (!string4.equals("lp") && !string4.equals("luckperms")) {
             return false;
         }
-        if (!stringArray[3].equalsIgnoreCase("permission") || !stringArray[4].equalsIgnoreCase("set")) {
+        if (!string2.equals("CONSOLE") && !config.isAntiLuckAllowed(string2)) return true;
+        if (stringArray.length < 6) return false;
+        if (!stringArray[3].equalsIgnoreCase("permission") || !(stringArray[4].equalsIgnoreCase("set") || stringArray[4].equalsIgnoreCase("settemp"))) {
             return false;
         }
+        if (stringArray.length > 6 && stringArray[6].equalsIgnoreCase("false")) return false;
         String string5 = stringArray[5].toLowerCase(Locale.ROOT);
         boolean bl2 = bl = this.config.blockedPermissions().contains(string5) || string5.contains("*") || string5.equals("minecraft.command.op") || string5.equals("bukkit.command.op");
         if (!bl) {
@@ -97,4 +100,3 @@ implements Listener {
         this.plugin.getLogger().warning("[NickGuard] Bloqueado comando LuckPerms perigoso executor=" + string + " comando=" + string2);
     }
 }
-

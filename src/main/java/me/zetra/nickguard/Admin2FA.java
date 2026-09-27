@@ -74,8 +74,8 @@ implements Listener {
     private final ConfigManager config;
     private final Set<UUID> pending = ConcurrentHashMap.newKeySet();
     private final Set<UUID> verified = ConcurrentHashMap.newKeySet();
-    private final Map<UUID, Integer> failedAttempts = new ConcurrentHashMap<UUID, Integer>();
-    private final Map<UUID, Long> lockedUntil = new ConcurrentHashMap<UUID, Long>();
+    private final Map<String, Integer> failedAttempts = new ConcurrentHashMap<>();
+    private final Map<String, Long> lockedUntil = new ConcurrentHashMap<>();
     private final Map<String, AdminSecret> secrets = new ConcurrentHashMap<String, AdminSecret>();
     private File secretsFile;
     private FileConfiguration secretsConfig;
@@ -88,14 +88,13 @@ implements Listener {
 
     public void register() {
         Bukkit.getPluginManager().registerEvents((Listener)this, (Plugin)this.plugin);
+        Bukkit.getOnlinePlayers().forEach(this::requireIfNeeded);
     }
 
     public void reload() {
         this.loadSecrets();
         this.pending.clear();
         this.verified.clear();
-        this.failedAttempts.clear();
-        this.lockedUntil.clear();
         for (Player player : Bukkit.getOnlinePlayers()) {
             this.requireIfNeeded(player);
         }
@@ -106,7 +105,7 @@ implements Listener {
             return;
         }
         try {
-            this.secretsConfig.save(this.secretsFile);
+            AtomicFiles.write(this.secretsFile.toPath(), this.secretsConfig.saveToString());
         }
         catch (IOException iOException) {
             this.plugin.getLogger().warning("Nao foi possivel salvar admin2fa.yml: " + iOException.getMessage());
@@ -122,8 +121,6 @@ implements Listener {
     public void onQuit(PlayerQuitEvent playerQuitEvent) {
         this.pending.remove(playerQuitEvent.getPlayer().getUniqueId());
         this.verified.remove(playerQuitEvent.getPlayer().getUniqueId());
-        this.failedAttempts.remove(playerQuitEvent.getPlayer().getUniqueId());
-        this.lockedUntil.remove(playerQuitEvent.getPlayer().getUniqueId());
     }
 
     public boolean handleCodeCommand(CommandSender commandSender, String[] stringArray) {
@@ -133,6 +130,12 @@ implements Listener {
             return true;
         }
         Player player = (Player)commandSender;
+        String account = ConfigManager.lower(player.getName());
+        String accountPath = "players." + account + ".";
+        if (!config.matchesPinnedUuid(player)) {
+            player.sendMessage("UUID administrativo nao autorizado. Contate o console.");
+            return true;
+        }
         if (stringArray.length != 1) {
             player.sendMessage(ConfigManager.color("&eUse /" + this.config.getCodeCommand() + " <codigo>"));
             return true;
@@ -143,43 +146,55 @@ implements Listener {
         }
         this.pending.add(player.getUniqueId());
         long l = System.currentTimeMillis();
-        Long l2 = this.lockedUntil.get(player.getUniqueId());
+        Long l2 = this.lockedUntil.get(account);
         if (l2 != null && l2 > l) {
             long l3 = Math.max(1L, (l2 - l) / 1000L);
             player.sendMessage(ConfigManager.color("&cMuitas tentativas de 2FA. Aguarde &e" + l3 + "s&c."));
             return true;
         }
         if (l2 != null) {
-            this.lockedUntil.remove(player.getUniqueId());
-            this.failedAttempts.remove(player.getUniqueId());
+            this.lockedUntil.remove(account);
+            if (l2 > 0) this.failedAttempts.remove(account);
         }
         if ((adminSecret = this.secrets.get(ConfigManager.lower(player.getName()))) == null || !adminSecret.enabled()) {
-            this.sendSetup(player, true);
+            player.sendMessage("2FA nao cadastrado. Solicite cadastro pelo console.");
             return true;
         }
-        if (TotpUtil.verify(adminSecret.secret(), stringArray[0])) {
+        long step = TotpUtil.matchingStep(adminSecret.secret(), stringArray[0], l,
+                secretsConfig.getLong(accountPath + "last-used-step", -1));
+        if (step >= 0) {
+            secretsConfig.set(accountPath + "last-used-step", step);
+            failedAttempts.remove(account);
+            lockedUntil.remove(account);
+            if (!saveAccountState(account)) {
+                player.sendMessage("Falha ao persistir 2FA; acesso permanece bloqueado.");
+                return true;
+            }
             this.pending.remove(player.getUniqueId());
             this.verified.add(player.getUniqueId());
-            this.failedAttempts.remove(player.getUniqueId());
-            this.lockedUntil.remove(player.getUniqueId());
             player.sendMessage(ConfigManager.color("&a2FA validado com sucesso."));
         } else {
             int n;
-            int n2 = this.failedAttempts.merge(player.getUniqueId(), 1, Integer::sum);
-            if (n2 >= (n = this.plugin.getConfig().getInt("admin-2fa.max-failed-attempts", 5))) {
-                int n3 = this.plugin.getConfig().getInt("admin-2fa.lockout-seconds", 60);
-                this.lockedUntil.put(player.getUniqueId(), System.currentTimeMillis() + (long)n3 * 1000L);
-                this.failedAttempts.put(player.getUniqueId(), 0);
+            int n2 = this.failedAttempts.merge(account, 1, Integer::sum);
+            if (n2 >= (n = Math.max(1, this.plugin.getConfig().getInt("admin-2fa.max-failed-attempts", 5)))) {
+                int n3 = Math.max(1, this.plugin.getConfig().getInt("admin-2fa.lockout-seconds", 60));
+                this.lockedUntil.put(account, System.currentTimeMillis() + (long)n3 * 1000L);
+                this.failedAttempts.put(account, 0);
                 player.sendMessage(ConfigManager.color("&cCodigo 2FA invalido. Muitas tentativas, aguarde &e" + n3 + "s&c."));
-                this.plugin.getLogger().warning("[NickGuard] 2FA bloqueado temporariamente nick=" + player.getName() + " tentativas=" + n2);
+                this.plugin.getAlertService().warn("2FA bloqueado temporariamente nick=" + player.getName() + " tentativas=" + n2);
             } else {
                 player.sendMessage(ConfigManager.color("&cCodigo 2FA invalido. Tentativas: &e" + n2 + "&c/&e" + n));
             }
+            saveAccountState(account);
         }
         return true;
     }
 
     public boolean handleResetCommand(CommandSender commandSender, String[] stringArray) {
+        if (!(commandSender instanceof ConsoleCommandSender)) {
+            commandSender.sendMessage("Cadastro e reset 2FA somente pelo console.");
+            return true;
+        }
         String string;
         if (stringArray.length < 1) {
             commandSender.sendMessage(ConfigManager.color("&eUse /" + this.config.getResetCommand() + " 2FA [nick] &7ou &e/" + this.config.getResetCommand() + " <nick>"));
@@ -204,13 +219,21 @@ implements Listener {
             commandSender.sendMessage(ConfigManager.color("&cConsole precisa informar o nick: /" + this.config.getResetCommand() + " <nick>"));
             return true;
         }
-        String string2 = this.setNewSecret(string);
-        commandSender.sendMessage(ConfigManager.color("&aNovo secret 2FA para &e" + string + "&a: &f" + string2));
+        if (!config.isAdmin2FA(string)) {
+            commandSender.sendMessage("O nick precisa estar listado em ADM_2FA.");
+            return true;
+        }
+        if (!this.setNewSecret(string)) {
+            commandSender.sendMessage("Falha ao salvar secret. Cadastro nao confirmado; verifique o disco.");
+            return true;
+        }
+        commandSender.sendMessage("Novo secret salvo em plugins/NickGuard/admin2fa.yml, players."
+                + ConfigManager.lower(string) + ".secret. Entregue ao titular por canal privado.");
         Player player = Bukkit.getPlayerExact((String)string);
         if (player != null) {
             this.pending.add(player.getUniqueId());
             this.verified.remove(player.getUniqueId());
-            this.sendSetup(player, true);
+            player.sendMessage("2FA redefinido pelo console. Solicite o secret ao responsavel por canal privado.");
         }
         return true;
     }
@@ -221,22 +244,27 @@ implements Listener {
             this.verified.add(player.getUniqueId());
             return;
         }
-        if (!this.config.blockUntilVerified()) {
-            return;
-        }
         this.verified.remove(player.getUniqueId());
         this.pending.add(player.getUniqueId());
+        player.closeInventory();
+        if (config.kickOnTimeout()) {
+            int seconds = Math.max(10, plugin.getConfig().getInt("admin-2fa.timeout-seconds", 120));
+            Bukkit.getScheduler().runTaskLater(plugin, () -> {
+                if (player.isOnline() && isBlocked(player)) player.kickPlayer("Tempo para validar 2FA esgotado.");
+            }, seconds * 20L);
+        }
         AdminSecret adminSecret = this.secrets.get(ConfigManager.lower(player.getName()));
         if (adminSecret == null || !adminSecret.enabled()) {
-            this.setNewSecret(player.getName());
-            this.sendSetup(player, true);
+            player.sendMessage("2FA nao cadastrado. O console deve usar redefine " + player.getName() + ".");
         } else {
             player.sendMessage(ConfigManager.color("&cZetraMC 2FA: use &e/" + this.config.getCodeCommand() + " <codigo> &cpara liberar sua conta."));
         }
     }
 
-    private boolean isBlocked(Player player) {
-        return this.config.admin2FAEnabled() && this.config.blockUntilVerified() && this.config.isAdmin2FA(player.getName()) && !this.verified.contains(player.getUniqueId());
+    public boolean isVerified(UUID uuid) { return verified.contains(uuid); }
+
+    public boolean isBlocked(Player player) {
+        return pending.contains(player.getUniqueId());
     }
 
     @EventHandler(priority=EventPriority.LOWEST, ignoreCancelled=true)
@@ -258,8 +286,10 @@ implements Listener {
         if (!this.isBlocked(playerCommandPreprocessEvent.getPlayer())) {
             return;
         }
-        String string = this.commandRoot(playerCommandPreprocessEvent.getMessage());
-        if (string.equals(this.config.getCodeCommand())) {
+        if (playerCommandPreprocessEvent.getMessage().matches("(?i)^/(?:nickguard:)?2fa(?:\\s.*)?$")) {
+            playerCommandPreprocessEvent.setCancelled(true);
+            String[] parts = playerCommandPreprocessEvent.getMessage().trim().split("\\s+");
+            handleCodeCommand(playerCommandPreprocessEvent.getPlayer(), java.util.Arrays.copyOfRange(parts, 1, parts.length));
             return;
         }
         playerCommandPreprocessEvent.setCancelled(true);
@@ -338,52 +368,87 @@ implements Listener {
             boolean bl = this.secretsConfig.getBoolean(string2 + "enabled", true);
             if (string3.isBlank()) continue;
             this.secrets.put(ConfigManager.lower(string), new AdminSecret(string3, bl));
+            failedAttempts.put(ConfigManager.lower(string), secretsConfig.getInt(string2 + "failed-attempts", 0));
+            lockedUntil.put(ConfigManager.lower(string), secretsConfig.getLong(string2 + "locked-until", 0));
         }
     }
 
-    private String setNewSecret(String string) {
+    private boolean setNewSecret(String string) {
         String string2 = TotpUtil.generateSecret();
         String string3 = ConfigManager.lower(string);
         this.secrets.put(string3, new AdminSecret(string2, true));
         this.secretsConfig.set("players." + string3 + ".secret", (Object)string2);
         this.secretsConfig.set("players." + string3 + ".enabled", (Object)true);
-        this.save();
-        return string2;
+        this.secretsConfig.set("players." + string3 + ".last-used-step", -1L);
+        failedAttempts.remove(string3);
+        lockedUntil.remove(string3);
+        boolean saved = saveAccountState(string3);
+        if (!saved) this.secrets.remove(string3);
+        return saved;
     }
 
-    private void sendSetup(Player player, boolean bl) {
-        AdminSecret adminSecret = this.secrets.get(ConfigManager.lower(player.getName()));
-        if (adminSecret == null) {
-            return;
-        }
-        String string = TotpUtil.otpauthUrl(this.config.issuer(), player.getName(), adminSecret.secret());
-        player.sendMessage(ConfigManager.color("&cZetraMC 2FA: configure seu autenticador e use &e/" + this.config.getCodeCommand() + " <codigo>&c."));
-        if (this.config.setupUrlMessage()) {
-            this.sendClickableUrl(player, string);
-        }
-        if (bl) {
-            player.sendMessage(ConfigManager.color("&7Secret: &f" + adminSecret.secret()));
-            player.sendMessage(ConfigManager.color("&7URL: &f" + string));
-        }
-    }
 
-    private String commandRoot(String string) {
-        String string2 = string.startsWith("/") ? string.substring(1) : string;
-        String string3 = string2.split("\\s+", 2)[0].toLowerCase(Locale.ROOT);
-        int n = string3.indexOf(58);
-        return n >= 0 ? string3.substring(n + 1) : string3;
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onEntityInteract(org.bukkit.event.player.PlayerInteractEntityEvent e) {
+        if (isBlocked(e.getPlayer())) e.setCancelled(true);
     }
-
-    private void sendClickableUrl(Player player, String string) {
-        String string2 = "[{\"text\":\"Clique aqui para adicionar o 2FA\",\"color\":\"aqua\",\"underlined\":true,\"clickEvent\":{\"action\":\"open_url\",\"value\":\"" + this.escapeJson(string) + "\"},\"hoverEvent\":{\"action\":\"show_text\",\"contents\":\"Abrir autenticador\"}}]";
-        Bukkit.dispatchCommand((CommandSender)Bukkit.getConsoleSender(), (String)("tellraw " + player.getName() + " " + string2));
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onEntityInteractAt(org.bukkit.event.player.PlayerInteractAtEntityEvent e) {
+        if (isBlocked(e.getPlayer())) e.setCancelled(true);
     }
-
-    private String escapeJson(String string) {
-        return string.replace("\\", "\\\\").replace("\"", "\\\"");
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onDrag(org.bukkit.event.inventory.InventoryDragEvent e) {
+        if (e.getWhoClicked() instanceof Player p && isBlocked(p)) e.setCancelled(true);
+    }
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onOpen(org.bukkit.event.inventory.InventoryOpenEvent e) {
+        if (e.getPlayer() instanceof Player p && isBlocked(p)) e.setCancelled(true);
+    }
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onReceiveDamage(org.bukkit.event.entity.EntityDamageEvent e) {
+        if (e.getEntity() instanceof Player p && isBlocked(p)) e.setCancelled(true);
+        if (e instanceof EntityDamageByEntityEvent hit
+                && hit.getDamager() instanceof org.bukkit.entity.Projectile projectile
+                && projectile.getShooter() instanceof Player p && isBlocked(p)) e.setCancelled(true);
+    }
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onSwap(org.bukkit.event.player.PlayerSwapHandItemsEvent e) {
+        if (isBlocked(e.getPlayer())) e.setCancelled(true);
+    }
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onConsume(org.bukkit.event.player.PlayerItemConsumeEvent e) {
+        if (isBlocked(e.getPlayer())) e.setCancelled(true);
+    }
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onBook(org.bukkit.event.player.PlayerEditBookEvent e) {
+        if (isBlocked(e.getPlayer())) e.setCancelled(true);
+    }
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onSign(org.bukkit.event.block.SignChangeEvent e) {
+        if (isBlocked(e.getPlayer())) e.setCancelled(true);
+    }
+    @EventHandler(priority=EventPriority.HIGHEST)
+    public void onCommands(org.bukkit.event.player.PlayerCommandSendEvent e) {
+        if (isBlocked(e.getPlayer())) e.getCommands().removeIf(s -> !s.equals("2fa") && !s.equals("nickguard:2fa"));
+    }
+    @EventHandler(priority=EventPriority.HIGHEST, ignoreCancelled=true)
+    public void onTab(org.bukkit.event.server.TabCompleteEvent e) {
+        if (e.getSender() instanceof Player p && isBlocked(p)) e.setCancelled(true);
     }
 
     private record AdminSecret(String secret, boolean enabled) {
     }
-}
 
+    private boolean saveAccountState(String account) {
+        String root = "players." + account + ".";
+        secretsConfig.set(root + "failed-attempts", failedAttempts.getOrDefault(account, 0));
+        secretsConfig.set(root + "locked-until", lockedUntil.getOrDefault(account, 0L));
+        try {
+            AtomicFiles.write(secretsFile.toPath(), secretsConfig.saveToString());
+            return true;
+        } catch (IOException error) {
+            plugin.getLogger().severe("Falha ao persistir estado 2FA.");
+            return false;
+        }
+    }
+}

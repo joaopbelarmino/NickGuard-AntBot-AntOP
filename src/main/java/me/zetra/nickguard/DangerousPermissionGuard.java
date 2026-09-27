@@ -42,11 +42,14 @@ implements Listener {
     private final ConfigManager config;
     private final AlertService alerts;
     private BukkitTask scanTask;
+    private Set<String> dangerous = Set.of();
+    private Set<String> patterns = Set.of();
 
     public DangerousPermissionGuard(NickGuardPlugin nickGuardPlugin, ConfigManager configManager, AlertService alertService) {
         this.plugin = nickGuardPlugin;
         this.config = configManager;
         this.alerts = alertService;
+        refreshRules();
     }
 
     public void register() {
@@ -55,7 +58,13 @@ implements Listener {
     }
 
     public void reload() {
+        refreshRules();
         this.scanOnlinePlayers();
+    }
+
+    private void refreshRules() {
+        dangerous = Set.copyOf(lowerSet(plugin.getConfig().getStringList("dangerous-permissions.permissions")));
+        patterns = Set.copyOf(lowerSet(plugin.getConfig().getStringList("dangerous-permissions.contains-patterns")));
     }
 
     public void cancel() {
@@ -69,9 +78,9 @@ implements Listener {
         Bukkit.getScheduler().runTaskLater((Plugin)this.plugin, () -> this.check(playerJoinEvent.getPlayer(), "join"), 20L);
     }
 
-    @EventHandler(priority=EventPriority.MONITOR, ignoreCancelled=true)
+    @EventHandler(priority=EventPriority.HIGH, ignoreCancelled=true)
     public void onCommand(PlayerCommandPreprocessEvent playerCommandPreprocessEvent) {
-        this.check(playerCommandPreprocessEvent.getPlayer(), "command");
+        if (this.check(playerCommandPreprocessEvent.getPlayer(), "command")) playerCommandPreprocessEvent.setCancelled(true);
     }
 
     private void scanOnlinePlayers() {
@@ -83,14 +92,15 @@ implements Listener {
         }
     }
 
-    private void check(Player player, String string) {
+    private boolean check(Player player, String string) {
+        if (plugin.getAdmin2FA().isBlocked(player) && config.matchesPinnedUuid(player)) return false;
         if (!this.enabled() || this.config.isSecurityAdmin(player.getName())) {
-            return;
+            return false;
         }
         String string2 = this.detectDangerousPermission(player);
         boolean bl = player.isOp();
         if (!bl && string2 == null) {
-            return;
+            return false;
         }
         if (bl && this.removeOp()) {
             player.setOp(false);
@@ -102,11 +112,12 @@ implements Listener {
         if (this.kickPlayer()) {
             player.kickPlayer(ConfigManager.color(this.plugin.getConfig().getString("dangerous-permissions.kick-message", "&cPermissao administrativa perigosa detectada.")));
         }
+        return true;
     }
 
     private String detectDangerousPermission(Player player) {
-        Set<String> set = this.lowerSet(this.plugin.getConfig().getStringList("dangerous-permissions.permissions"));
-        Set<String> set2 = this.lowerSet(this.plugin.getConfig().getStringList("dangerous-permissions.contains-patterns"));
+        Set<String> set = dangerous;
+        Set<String> set2 = patterns;
         for (String string : set) {
             if (!this.matchesPermissionCheck(player, string)) continue;
             return string;

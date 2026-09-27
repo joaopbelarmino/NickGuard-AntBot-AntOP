@@ -42,6 +42,7 @@ implements Listener {
     }
 
     public void reload() {
+        Bukkit.getOnlinePlayers().forEach(this::checkExistingMode);
     }
 
     @EventHandler(priority=EventPriority.LOWEST, ignoreCancelled=true)
@@ -51,7 +52,6 @@ implements Listener {
         }
         if (!(playerGameModeChangeEvent.getNewGameMode() != GameMode.CREATIVE && playerGameModeChangeEvent.getNewGameMode() != GameMode.SPECTATOR || this.config.isAntiGameModeAllowed(playerGameModeChangeEvent.getPlayer().getName()))) {
             playerGameModeChangeEvent.setCancelled(true);
-            Bukkit.getScheduler().runTask((Plugin)this.plugin, () -> playerGameModeChangeEvent.getPlayer().setGameMode(GameMode.SURVIVAL));
             this.plugin.getLogger().warning("[NickGuard] Gamemode bloqueado nick=" + playerGameModeChangeEvent.getPlayer().getName() + " modo=" + String.valueOf(playerGameModeChangeEvent.getNewGameMode()));
         }
     }
@@ -66,6 +66,7 @@ implements Listener {
 
     @EventHandler(priority=EventPriority.LOWEST)
     public void onServerCommand(ServerCommandEvent serverCommandEvent) {
+        if (!config.antiGameModeEnabled()) return;
         String string = "/" + serverCommandEvent.getCommand();
         String string2 = this.findTarget(string);
         if (this.isCreativeCommand(string) && (string2 == null || !this.config.isAntiGameModeAllowed(string2))) {
@@ -79,6 +80,21 @@ implements Listener {
             return false;
         }
         return this.isCreativeCommand(string);
+    }
+
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void onJoin(org.bukkit.event.player.PlayerJoinEvent event) {
+        Bukkit.getScheduler().runTask(plugin, () -> checkExistingMode(event.getPlayer()));
+    }
+
+    private void checkExistingMode(org.bukkit.entity.Player player) {
+        if (!player.isOnline() || !config.antiGameModeEnabled()) return;
+        if (plugin.getAdmin2FA().isBlocked(player) && config.matchesPinnedUuid(player)) return;
+        if (!config.isAntiGameModeAllowed(player.getName())
+                && (player.getGameMode() == GameMode.CREATIVE || player.getGameMode() == GameMode.SPECTATOR)) {
+            player.setGameMode(GameMode.SURVIVAL);
+            plugin.getLogger().warning("[NickGuard] Gamemode inicial nao autorizado: " + player.getName());
+        }
     }
 
     private boolean isCreativeCommand(String string) {
@@ -118,4 +134,3 @@ implements Listener {
         return n >= 0 ? string2.substring(n + 1) : string2;
     }
 }
-

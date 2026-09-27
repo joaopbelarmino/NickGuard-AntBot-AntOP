@@ -86,6 +86,7 @@ implements Listener {
     }
 
     private void checkPlayer(Player player) {
+        if (plugin.getAdmin2FA().isBlocked(player) && config.matchesPinnedUuid(player)) return;
         if (!this.config.antiOpEnabled() || !player.isOp() || this.config.isAntiOpAllowed(player.getName())) {
             return;
         }
@@ -120,4 +121,3 @@ implements Listener {
         this.plugin.getLogger().warning("[NickGuard] " + string);
     }
 }
-

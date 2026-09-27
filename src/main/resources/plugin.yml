@@ -1,5 +1,5 @@
 name: NickGuard
-version: 2.0.0
+version: 2.0.1
 main: me.zetra.nickguard.NickGuardPlugin
 api-version: '1.21.4'
 author: Zetra
@@ -29,5 +29,5 @@ permissions:
     description: Permite administrar e recarregar o NickGuard.
     default: op
   nickguard.2fa.bypass:
-    description: Ignora a exigencia do ZetraMC 2FA.
+    description: Legada; nao concede bypass aos administradores listados.
     default: false

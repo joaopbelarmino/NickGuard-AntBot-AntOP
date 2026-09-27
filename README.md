@@ -4,13 +4,13 @@ Plugin de seguranca para servidores Minecraft Paper, com protecao de identidade,
 
 ## Projeto
 
-- Versao base: `2.0.0`
+- Versao atual: `2.0.1` (base reconstruida: `2.0.0`)
 - API: Paper `1.21.4`
 - Java: `21`
 - Build: Maven
 - Classe principal: `me.zetra.nickguard.NickGuardPlugin`
 
-O codigo-fonte foi reconstruido a partir do binario oficial usado pelo servidor e validado por recompilacao. O binario original nao e armazenado neste repositorio.
+O codigo-fonte foi reconstruido a partir do binario fornecido pelo administrador e validado por recompilacao. A arvore atual nao inclui JARs; o historico antigo pode conter o binario inicialmente enviado.
 
 ## Compilar
 
@@ -20,7 +20,18 @@ O codigo-fonte foi reconstruido a partir do binario oficial usado pelo servidor 
 
 No Windows, use `.\mvnw.cmd clean package`.
 
-O arquivo compilado sera gerado em `target/NickGuard-2.0.0.jar`.
+O arquivo compilado sera gerado em `target/NickGuard-2.0.1.jar`. Use `./mvnw verify` para executar os testes. O CI valida o fonte sem publicar binarios.
+
+## Auditoria e migracao 2.0.1
+
+Leia [o relatorio completo](docs/AUDITORIA-2.0.1.md) antes de instalar. Ele distingue falhas confirmadas, exageros e limites ainda existentes.
+
+- Listas vazias agora significam nenhum administrador, sem nomes embutidos como fallback.
+- Cadastro/reset 2FA somente pelo console: `redefine <nick>`. O secret fica em `admin2fa.yml`; entregue ao titular por canal privado. Nao e mostrado automaticamente no chat ou console.
+- Tentativas, cooldown e ultimo intervalo TOTP usado sao persistidos. Reload exige nova validacao.
+- `admin-identities` permite fixar UUID por nick lowercase; `require-admin-uuid: true` torna esse cadastro obrigatorio para as excecoes administrativas. Primeiro configure e teste seus UUIDs reais.
+- Historicos de nick ambiguos sao bloqueados sem escolher um dono automaticamente. `/remover` exige alvo offline e persiste uma exclusao do UUID.
+- Configuracoes existentes nao sao sobrescritas. Compare com `src/main/resources/config.yml` antes de migrar.
 
 ## Estrutura
 

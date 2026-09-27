@@ -7,6 +7,9 @@
 build/
 target/
 *.class
+*.jar
+/identity-exclusions.yml
+/javac.*.args
 
 # Runtime data and secrets
 /admin2fa.yml
