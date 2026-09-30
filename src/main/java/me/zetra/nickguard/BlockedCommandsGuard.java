@@ -13,6 +13,9 @@
 package me.zetra.nickguard;
 
 import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import me.zetra.nickguard.AlertService;
 import me.zetra.nickguard.ConfigManager;
 import me.zetra.nickguard.NickGuardPlugin;
@@ -29,6 +32,9 @@ implements Listener {
     private final NickGuardPlugin plugin;
     private final ConfigManager config;
     private final AlertService alerts;
+    // Per-player throttle so spamming a blocked command cannot flood the log or the alert channels.
+    private final Map<UUID, Long> nextAlert = new ConcurrentHashMap<>();
+    private final Map<UUID, Integer> suppressedAttempts = new ConcurrentHashMap<>();
 
     public BlockedCommandsGuard(NickGuardPlugin nickGuardPlugin, ConfigManager configManager, AlertService alertService) {
         this.plugin = nickGuardPlugin;
@@ -56,9 +62,29 @@ implements Listener {
             if (string4.isBlank() || !this.matches(string, string2, string4)) continue;
             playerCommandPreprocessEvent.setCancelled(true);
             player.sendMessage(ConfigManager.color(this.plugin.getConfig().getString("blocked-commands.message", "&cComando bloqueado pelo NickGuard.")));
-            this.alerts.warn("Blocked command executor=" + player.getName() + " command=" + playerCommandPreprocessEvent.getMessage());
+            this.reportBlocked(player, playerCommandPreprocessEvent.getMessage());
             return;
         }
+    }
+
+    private void reportBlocked(Player player, String command) {
+        long now = System.currentTimeMillis();
+        UUID id = player.getUniqueId();
+        if (now < nextAlert.getOrDefault(id, 0L)) {
+            suppressedAttempts.merge(id, 1, Integer::sum);
+            return;
+        }
+        long cooldown = Math.max(0, plugin.getConfig().getInt("blocked-commands.alert-cooldown-seconds", 10)) * 1000L;
+        nextAlert.put(id, now + cooldown);
+        Integer skipped = suppressedAttempts.remove(id);
+        alerts.warn("blocked-command", "Blocked command executor=" + player.getName() + " command=" + command
+                + (skipped == null ? "" : " (+" + skipped + " tentativas suprimidas)"));
+    }
+
+    @EventHandler(priority=EventPriority.MONITOR)
+    public void onQuit(org.bukkit.event.player.PlayerQuitEvent event) {
+        nextAlert.remove(event.getPlayer().getUniqueId());
+        suppressedAttempts.remove(event.getPlayer().getUniqueId());
     }
 
     private boolean matches(String string, String string2, String string3) {

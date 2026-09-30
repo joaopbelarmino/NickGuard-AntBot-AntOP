@@ -4,7 +4,7 @@ Plugin de seguranca para servidores Minecraft Paper, com protecao de identidade,
 
 ## Projeto
 
-- Versao atual: `2.0.1` (base reconstruida: `2.0.0`)
+- Versao atual: `2.0.2` (base reconstruida: `2.0.0`)
 - API: Paper `1.21.4`
 - Java: `21`
 - Build: Maven
@@ -20,7 +20,15 @@ O codigo-fonte foi reconstruido a partir do binario fornecido pelo administrador
 
 No Windows, use `.\mvnw.cmd clean package`.
 
-O arquivo compilado sera gerado em `target/NickGuard-2.0.1.jar`. Use `./mvnw verify` para executar os testes. O CI valida o fonte sem publicar binarios.
+O arquivo compilado sera gerado em `target/NickGuard-2.0.2.jar`. Use `./mvnw verify` para executar os testes. O CI valida o fonte sem publicar binarios.
+
+## Correcoes 2.0.2
+
+Veja [docs/CORRECOES-2.0.2.md](docs/CORRECOES-2.0.2.md).
+
+- Anti-LuckPerms reconhece todos os aliases (`/perm`, `/perms`, `/permission`, `/permissions`, namespaced e aliases customizados).
+- Log do console registra todos os alertas; o limite de chat/Discord e por categoria, entao spam de comando bloqueado nao esconde alertas de 2FA/identidade.
+- Aviso no console para nicks com excecao administrativa fora de `ADM_2FA`; `require-2fa-for-exceptions: true` remove essas excecoes.
 
 ## Auditoria e migracao 2.0.1
 

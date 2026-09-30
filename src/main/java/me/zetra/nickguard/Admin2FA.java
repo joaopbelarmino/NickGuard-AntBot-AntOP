@@ -181,7 +181,7 @@ implements Listener {
                 this.lockedUntil.put(account, System.currentTimeMillis() + (long)n3 * 1000L);
                 this.failedAttempts.put(account, 0);
                 player.sendMessage(ConfigManager.color("&cCodigo 2FA invalido. Muitas tentativas, aguarde &e" + n3 + "s&c."));
-                this.plugin.getAlertService().warn("2FA bloqueado temporariamente nick=" + player.getName() + " tentativas=" + n2);
+                this.plugin.getAlertService().warn("2fa", "2FA bloqueado temporariamente nick=" + player.getName() + " tentativas=" + n2);
             } else {
                 player.sendMessage(ConfigManager.color("&cCodigo 2FA invalido. Tentativas: &e" + n2 + "&c/&e" + n));
             }

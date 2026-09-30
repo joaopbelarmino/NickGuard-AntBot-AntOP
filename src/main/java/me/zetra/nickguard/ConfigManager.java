@@ -37,6 +37,28 @@ public final class ConfigManager {
         this.antiLuckAllowed = this.lowerSet(fileConfiguration.getStringList("anti-luckperms-wildcard.allowed"));
         this.antiGameModeAllowed = this.lowerSet(fileConfiguration.getStringList("anti-gamemode-creative.allowed"));
         this.blockedPermissions = this.lowerSet(fileConfiguration.getStringList("anti-luckperms-wildcard.blocked-permissions"));
+        this.warnExceptionsWithout2FA();
+    }
+
+    private void warnExceptionsWithout2FA() {
+        List<String> names = exceptionsWithout2FA(admin2FAEnabled() ? adm2FA : Set.of(),
+                securityAdmins, antiOpAllowed, antiLuckAllowed, antiGameModeAllowed);
+        if (names.isEmpty()) return;
+        String effect = requireTwoFactorForExceptions()
+                ? "e NAO recebem excecao administrativa (require-2fa-for-exceptions: true)."
+                : "e sao liberados apenas pelo nick. Adicione-os em ADM_2FA ou ative require-2fa-for-exceptions.";
+        plugin.getLogger().warning("[NickGuard] Nicks com excecao administrativa sem 2FA: " + names + " " + effect);
+    }
+
+    /** Names that hold an administrative exception but are not protected by the 2FA module. */
+    @SafeVarargs
+    static List<String> exceptionsWithout2FA(Set<String> twoFactor, Set<String>... allowlists) {
+        return java.util.Arrays.stream(allowlists).flatMap(Set::stream)
+                .filter(name -> !twoFactor.contains(name)).distinct().sorted().toList();
+    }
+
+    public boolean requireTwoFactorForExceptions() {
+        return this.plugin.getConfig().getBoolean("require-2fa-for-exceptions", false);
     }
 
     public boolean isIdentityGuardEnabled() {
@@ -129,8 +151,8 @@ public final class ConfigManager {
     private boolean sessionAuthorized(String name) {
         org.bukkit.entity.Player player = org.bukkit.Bukkit.getPlayerExact(name);
         if (player == null || !matchesPinnedUuid(player)) return false;
-        return !admin2FAEnabled() || !isAdmin2FA(name)
-                || (plugin.getAdmin2FA() != null && plugin.getAdmin2FA().isVerified(player.getUniqueId()));
+        if (!admin2FAEnabled() || !isAdmin2FA(name)) return !requireTwoFactorForExceptions();
+        return plugin.getAdmin2FA() != null && plugin.getAdmin2FA().isVerified(player.getUniqueId());
     }
 
     public boolean matchesPinnedUuid(org.bukkit.entity.Player player) {

@@ -132,7 +132,7 @@ implements Listener {
             int n = this.recordAndCount(this.ipAttempts, string + "#burst", l2, 60000L);
             if (n >= this.blacklistAttempts()) {
                 this.blockedIps.put(string, -1L);
-                this.alerts.warn("Blocked IP " + string + " - reason: relogin flood blacklist - attempts: " + n + "/60s - duration: manual");
+                this.alerts.warn("raid-block", "Blocked IP " + string + " - reason: relogin flood blacklist - attempts: " + n + "/60s - duration: manual");
                 this.saveBlocksAsync();
                 asyncPlayerPreLoginEvent.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, this.blockMessage());
                 return;
@@ -197,7 +197,7 @@ implements Listener {
     public void setRaidMode(boolean bl) {
         this.manualRaidMode = bl;
         this.raidModeUntil = !bl ? 0L : System.currentTimeMillis() + (long)this.raidModeDurationSeconds() * 1000L;
-        this.alerts.warn("Raid mode " + (bl ? "enabled manually" : "disabled manually"));
+        this.alerts.warn("raid-mode", "Raid mode " + (bl ? "enabled manually" : "disabled manually"));
     }
 
     public boolean isRaidModeActive() {
@@ -207,14 +207,14 @@ implements Listener {
     private void blockIp(String string, long l, String string2) {
         long l2 = l <= 0L ? -1L : System.currentTimeMillis() + l * 1000L;
         this.blockedIps.put(string, l2);
-        this.alerts.warn("Blocked IP " + string + " - reason: " + string2 + " - duration: " + this.formatDuration(l));
+        this.alerts.warn("raid-block", "Blocked IP " + string + " - reason: " + string2 + " - duration: " + this.formatDuration(l));
         this.saveBlocksAsync();
     }
 
     private void blockPattern(String string, long l, String string2) {
         long l2 = l <= 0L ? -1L : System.currentTimeMillis() + l * 1000L;
         this.blockedPatterns.put(string, l2);
-        this.alerts.warn("Blocked nick pattern " + string + " - reason: " + string2 + " - duration: " + this.formatDuration(l));
+        this.alerts.warn("raid-block", "Blocked nick pattern " + string + " - reason: " + string2 + " - duration: " + this.formatDuration(l));
         this.saveBlocksAsync();
     }
 
@@ -224,7 +224,7 @@ implements Listener {
             return;
         }
         this.raidModeUntil = l2;
-        this.alerts.warn("Raid mode enabled - reason: " + string + " - duration: " + this.formatDuration(l));
+        this.alerts.warn("raid-mode", "Raid mode enabled - reason: " + string + " - duration: " + this.formatDuration(l));
     }
 
     private boolean checkAutoRaidMode(long l) {

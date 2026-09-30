@@ -6,6 +6,7 @@ import java.net.http.*;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicBoolean;
 import org.bukkit.Bukkit;
@@ -15,8 +16,10 @@ public final class AlertService {
     private final NickGuardPlugin plugin;
     private final ConfigManager config;
     private final HttpClient httpClient = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build();
-    private final AtomicLong nextAlert = new AtomicLong();
-    private final AtomicLong suppressed = new AtomicLong();
+    // One gate per category: noisy sources (e.g. /pl spam) cannot consume the slot of 2FA/identity alerts.
+    private final Map<String, Gate> gates = new ConcurrentHashMap<>();
+    private final AtomicLong discordBlockedUntil = new AtomicLong();
+    private final AtomicLong discordDropped = new AtomicLong();
     private final AtomicBoolean inFlight = new AtomicBoolean();
     private volatile boolean discordEnabled;
     private volatile String webhook;
@@ -35,17 +38,17 @@ public final class AlertService {
     }
 
     public void warn(String message) {
-        long now = System.currentTimeMillis();
-        long next = nextAlert.get();
-        if (now < next || !nextAlert.compareAndSet(next, now + intervalMillis)) {
-            suppressed.incrementAndGet();
-            return;
-        }
-        long count = suppressed.getAndSet(0);
+        warn("general", message);
+    }
+
+    public void warn(String category, String message) {
         String clean = message.replaceAll("[\\p{Cntrl}]", " ");
         if (clean.length() > 1600) clean = clean.substring(0, 1600);
-        String text = clean + (count == 0 ? "" : " [suppressed alerts=" + count + "]");
-        plugin.getLogger().warning("[NICKGUARD] " + text);
+        // The local log is the audit trail and is never rate limited.
+        plugin.getLogger().warning("[NICKGUARD] " + clean);
+        long count = admit(category, System.currentTimeMillis());
+        if (count < 0) return;
+        String text = clean + (count == 0 ? "" : " [+" + count + " alertas '" + category + "' suprimidos]");
         Runnable notify = () -> {
             for (Player player : Bukkit.getOnlinePlayers()) {
                 if (plugin.getAdmin2FA() != null && plugin.getAdmin2FA().isBlocked(player)) continue;
@@ -60,17 +63,28 @@ public final class AlertService {
 
     public void info(String message) { plugin.getLogger().info("[NICKGUARD] " + message); }
 
+    /** Returns -1 when the category is rate limited, otherwise how many alerts of it were suppressed before. */
+    long admit(String category, long now) {
+        return gates.computeIfAbsent(category, key -> new Gate()).tryPass(now, intervalMillis);
+    }
+
     static String discordPayload(String message) {
         return new Gson().toJson(Map.of("content", "[NICKGUARD] " + message,
                 "allowed_mentions", Map.of("parse", List.of())));
     }
 
     private void sendDiscord(String message) {
-        if (!discordEnabled || webhook == null || webhook.isBlank() || !inFlight.compareAndSet(false, true)) return;
+        if (!discordEnabled || webhook == null || webhook.isBlank()) return;
+        if (System.currentTimeMillis() < discordBlockedUntil.get() || !inFlight.compareAndSet(false, true)) {
+            discordDropped.incrementAndGet();
+            return;
+        }
+        long dropped = discordDropped.getAndSet(0);
+        String content = message + (dropped == 0 ? "" : " [+" + dropped + " alertas nao enviados ao Discord; veja o log]");
         try {
             HttpRequest request = HttpRequest.newBuilder(URI.create(webhook))
                     .timeout(Duration.ofSeconds(10)).header("Content-Type", "application/json")
-                    .POST(HttpRequest.BodyPublishers.ofString(discordPayload(message))).build();
+                    .POST(HttpRequest.BodyPublishers.ofString(discordPayload(content))).build();
             httpClient.sendAsync(request, HttpResponse.BodyHandlers.discarding()).whenComplete((response, error) -> {
                 inFlight.set(false);
                 if (error != null) {
@@ -80,12 +94,26 @@ public final class AlertService {
                     try { seconds = Math.max(1, Long.parseLong(response.headers().firstValue("Retry-After").orElse("60"))); }
                     catch (NumberFormatException ignored) {}
                     long retry = System.currentTimeMillis() + Math.min(seconds, 3600) * 1000L;
-                    nextAlert.accumulateAndGet(retry, Math::max);
+                    discordBlockedUntil.accumulateAndGet(retry, Math::max);
                 }
             });
         } catch (RuntimeException error) {
             inFlight.set(false);
             plugin.getLogger().warning("[NICKGUARD] Webhook invalido; confira alerts.discord.webhook-url.");
+        }
+    }
+
+    private static final class Gate {
+        private final AtomicLong next = new AtomicLong();
+        private final AtomicLong suppressed = new AtomicLong();
+
+        long tryPass(long now, long interval) {
+            long current = next.get();
+            if (now < current || !next.compareAndSet(current, now + interval)) {
+                suppressed.incrementAndGet();
+                return -1;
+            }
+            return suppressed.getAndSet(0);
         }
     }
 }

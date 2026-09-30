@@ -108,7 +108,7 @@ implements Listener {
         String string3 = string2 == null ? "op" : string2;
         this.runConfiguredCommands(player, string3);
         this.quarantine(player);
-        this.alerts.warn("Dangerous permission detected for " + player.getName() + ": " + string3 + " - action: " + this.actionSummary() + " - source: " + string);
+        this.alerts.warn("dangerous-permission", "Dangerous permission detected for " + player.getName() + ": " + string3 + " - action: " + this.actionSummary() + " - source: " + string);
         if (this.kickPlayer()) {
             player.kickPlayer(ConfigManager.color(this.plugin.getConfig().getString("dangerous-permissions.kick-message", "&cPermissao administrativa perigosa detectada.")));
         }

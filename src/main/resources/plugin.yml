@@ -1,5 +1,5 @@
 name: NickGuard
-version: 2.0.1
+version: 2.0.2
 main: me.zetra.nickguard.NickGuardPlugin
 api-version: '1.21.4'
 author: Zetra

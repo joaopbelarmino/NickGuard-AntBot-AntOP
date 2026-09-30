@@ -10,6 +10,9 @@ security-admins: []
 # UUIDs fixos opcionais: nick em lowercase -> UUID confirmado pelo operador.
 admin-identities: {}
 require-admin-uuid: false
+# true: nicks das listas de excecao que nao estao em ADM_2FA perdem a excecao.
+# false: continuam liberados so pelo nick (o plugin avisa no console ao iniciar/recarregar).
+require-2fa-for-exceptions: false
 
 admin-2fa:
   enabled: true
@@ -42,6 +45,7 @@ anti-gamemode-creative:
   allowed: []
 
 alerts:
+  # Limite por categoria para chat/Discord. O log do console registra todos os alertas.
   minimum-interval-seconds: 5
   discord:
     enabled: false
@@ -178,6 +182,8 @@ client-signature-guard:
 
 blocked-commands:
   enabled: true
+  # Cada jogador gera no maximo 1 alerta de comando bloqueado neste intervalo.
+  alert-cooldown-seconds: 10
   message: "&cComando bloqueado pelo NickGuard."
   commands:
     - "pl"

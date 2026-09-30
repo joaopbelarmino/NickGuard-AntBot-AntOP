@@ -82,7 +82,7 @@ PluginMessageListener {
     }
 
     private void punish(Player player, String string, String string2) {
-        this.alerts.warn("Blocked client signature player=" + player.getName() + " source=" + string + " value=" + this.sanitize(string2));
+        this.alerts.warn("client-signature", "Blocked client signature player=" + player.getName() + " source=" + string + " value=" + this.sanitize(string2));
         if (this.plugin.getConfig().getBoolean("client-signature-guard.kick-player", true)) {
             Bukkit.getScheduler().runTask((Plugin)this.plugin, () -> player.kickPlayer(ConfigManager.color(this.plugin.getConfig().getString("client-signature-guard.kick-message", "&cCliente nao permitido no servidor."))));
         }

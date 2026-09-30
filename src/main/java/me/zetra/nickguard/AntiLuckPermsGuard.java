@@ -13,9 +13,12 @@
 package me.zetra.nickguard;
 
 import java.util.Locale;
+import java.util.Set;
 import me.zetra.nickguard.ConfigManager;
 import me.zetra.nickguard.NickGuardPlugin;
 import org.bukkit.Bukkit;
+import org.bukkit.command.Command;
+import org.bukkit.command.PluginIdentifiableCommand;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
@@ -25,6 +28,9 @@ import org.bukkit.plugin.Plugin;
 
 public final class AntiLuckPermsGuard
 implements Listener {
+    // Labels declared in LuckPerms' plugin.yml; used when the command map cannot resolve the owner.
+    static final Set<String> LUCKPERMS_LABELS = Set.of("luckperms", "lp", "perm", "perms", "permission", "permissions");
+    private static final Set<String> PERMISSION_SUBCOMMANDS = Set.of("permission", "perm", "perms");
     private final NickGuardPlugin plugin;
     private final ConfigManager config;
 
@@ -58,7 +64,7 @@ implements Listener {
         }
     }
 
-    private boolean isDangerous(String string, String string2) {
+    boolean isDangerous(String string, String string2) {
         boolean bl;
         if (!this.config.antiLuckPermsEnabled()) {
             return false;
@@ -68,13 +74,12 @@ implements Listener {
         if (stringArray.length < 1) {
             return false;
         }
-        String string4 = this.stripNamespace(stringArray[0]);
-        if (!string4.equals("lp") && !string4.equals("luckperms")) {
+        if (!this.isLuckPermsCommand(stringArray[0])) {
             return false;
         }
         if (!string2.equals("CONSOLE") && !config.isAntiLuckAllowed(string2)) return true;
         if (stringArray.length < 6) return false;
-        if (!stringArray[3].equalsIgnoreCase("permission") || !(stringArray[4].equalsIgnoreCase("set") || stringArray[4].equalsIgnoreCase("settemp"))) {
+        if (!PERMISSION_SUBCOMMANDS.contains(stringArray[3].toLowerCase(Locale.ROOT)) || !(stringArray[4].equalsIgnoreCase("set") || stringArray[4].equalsIgnoreCase("settemp"))) {
             return false;
         }
         if (stringArray.length > 6 && stringArray[6].equalsIgnoreCase("false")) return false;
@@ -90,10 +95,23 @@ implements Listener {
         return !bl3 || !bl4;
     }
 
-    private String stripNamespace(String string) {
-        String string2 = string.toLowerCase(Locale.ROOT);
-        int n = string2.indexOf(58);
-        return n >= 0 ? string2.substring(n + 1) : string2;
+    private boolean isLuckPermsCommand(String label) {
+        String owner = null;
+        try {
+            Command command = Bukkit.getCommandMap().getCommand(label.toLowerCase(Locale.ROOT));
+            if (command instanceof PluginIdentifiableCommand pluginCommand) owner = pluginCommand.getPlugin().getName();
+        } catch (RuntimeException unavailable) {
+            // No server (tests) or a broken command map: fall back to the known labels.
+        }
+        return isLuckPermsLabel(label, owner);
+    }
+
+    /** Owner-based match catches every alias (including custom ones); known labels cover an unresolved owner. */
+    static boolean isLuckPermsLabel(String label, String owner) {
+        if (owner != null && !owner.isBlank()) return owner.equalsIgnoreCase("LuckPerms");
+        String lower = label.toLowerCase(Locale.ROOT);
+        int n = lower.indexOf(58);
+        return LUCKPERMS_LABELS.contains(n >= 0 ? lower.substring(n + 1) : lower);
     }
 
     private void log(String string, String string2) {

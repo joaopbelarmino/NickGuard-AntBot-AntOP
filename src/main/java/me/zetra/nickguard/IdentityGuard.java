@@ -82,7 +82,7 @@ public final class IdentityGuard implements Listener {
         if (!config.isIdentityGuardEnabled() || event.getLoginResult() != AsyncPlayerPreLoginEvent.Result.ALLOWED) return;
         if (!reserve(event.getName(), event.getUniqueId())) {
             event.disallow(AsyncPlayerPreLoginEvent.Result.KICK_OTHER, config.identityKickMessage());
-            plugin.getAlertService().warn("Identity bloqueada nick=" + event.getName() + " uuid_tentativa=" + event.getUniqueId()
+            plugin.getAlertService().warn("identity", "Identity bloqueada nick=" + event.getName() + " uuid_tentativa=" + event.getUniqueId()
                     + " reason=UUID diferente, removido ou historico ambiguo");
         }
     }
